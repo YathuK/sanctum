@@ -1,3 +1,4 @@
+import { logError } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
@@ -76,7 +77,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ transactions: results, total, page, pages: Math.ceil(total / limit) });
   } catch (err: any) {
-    console.error("GET transactions error:", err);
+    logError("api", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

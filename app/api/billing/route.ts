@@ -1,3 +1,4 @@
+import { logError } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
@@ -36,7 +37,7 @@ export async function GET() {
       stripeCustomerId: workspace?.stripeCustomerId || null,
     });
   } catch (err: any) {
-    console.error("GET billing error:", err);
+    logError("api", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
@@ -91,7 +92,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ url: checkoutSession.url });
   } catch (err: any) {
-    console.error("POST billing error:", err);
+    logError("api", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

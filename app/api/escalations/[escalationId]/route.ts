@@ -1,3 +1,4 @@
+import { logError } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
@@ -85,7 +86,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { escalation
 
     return NextResponse.json(escalation);
   } catch (err: any) {
-    console.error("Escalation error:", err);
+    logError("api", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

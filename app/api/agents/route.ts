@@ -1,3 +1,4 @@
+import { logError } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
@@ -5,7 +6,7 @@ import { connectDB } from "@/lib/mongodb";
 import { Agent } from "@/lib/models/Agent";
 import { User } from "@/lib/models/User";
 import { signAgentToken } from "@/lib/jwt";
-import { sanitizeString } from "@/lib/validate";
+import { sanitizeString, sanitizeStringArray, isValidExpiryDate } from "@/lib/validate";
 import mongoose from "mongoose";
 
 export async function GET() {
@@ -22,7 +23,7 @@ export async function GET() {
     const agents = await Agent.find({ userId: user._id }).sort({ createdAt: -1 }).limit(100);
     return NextResponse.json(agents);
   } catch (err: any) {
-    console.error("GET agents error:", err);
+    logError("api", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
@@ -66,17 +67,12 @@ export async function POST(req: NextRequest) {
     }
 
     const expiresDate = new Date(expiresAt);
-    if (isNaN(expiresDate.getTime()) || expiresDate <= new Date()) {
-      return NextResponse.json({ error: "expiresAt must be a valid future date" }, { status: 400 });
+    if (isNaN(expiresDate.getTime()) || !isValidExpiryDate(expiresDate)) {
+      return NextResponse.json({ error: "expiresAt must be a valid future date (max 1 year)" }, { status: 400 });
     }
 
-    const approvedCategories = Array.isArray(policy.approvedCategories)
-      ? policy.approvedCategories.filter((c: any) => typeof c === "string").map((c: string) => c.trim().toLowerCase())
-      : [];
-
-    const blockedVendors = Array.isArray(policy.blockedVendors)
-      ? policy.blockedVendors.filter((v: any) => typeof v === "string" && v.trim()).map((v: string) => v.trim())
-      : [];
+    const approvedCategories = sanitizeStringArray(policy.approvedCategories, 20, 50);
+    const blockedVendors = sanitizeStringArray(policy.blockedVendors, 100, 200);
 
     const agentId = new mongoose.Types.ObjectId();
 
@@ -106,7 +102,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ...agent.toObject(), token }, { status: 201 });
   } catch (err: any) {
-    console.error("POST agents error:", err);
+    logError("api", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

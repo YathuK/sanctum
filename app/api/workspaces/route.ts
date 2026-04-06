@@ -1,3 +1,4 @@
+import { logError } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
@@ -35,7 +36,7 @@ export async function GET() {
 
     return NextResponse.json(results);
   } catch (err: any) {
-    console.error("GET workspaces error:", err);
+    logError("api", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
@@ -79,7 +80,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(workspace, { status: 201 });
   } catch (err: any) {
-    console.error("POST workspaces error:", err);
+    logError("api", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

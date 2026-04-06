@@ -1,3 +1,4 @@
+import { logError } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(member, { status: 201 });
   } catch (err: any) {
-    console.error("POST invites error:", err);
+    logError("api", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -1,9 +1,10 @@
+import { logError } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
 import { connectDB } from "@/lib/mongodb";
 import { User } from "@/lib/models/User";
-import { sanitizeString, isValidUrl } from "@/lib/validate";
+import { sanitizeString, isValidHttpsUrl } from "@/lib/validate";
 
 export async function GET() {
   try {
@@ -22,7 +23,7 @@ export async function GET() {
       email: user.email,
     });
   } catch (err: any) {
-    console.error("GET settings error:", err);
+    logError("api", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
@@ -44,7 +45,7 @@ export async function PATCH(req: NextRequest) {
     if (body.company !== undefined) update.company = sanitizeString(body.company, 200);
     if (body.webhookUrl !== undefined) {
       const url = sanitizeString(body.webhookUrl, 500);
-      if (url && !isValidUrl(url)) {
+      if (url && !isValidHttpsUrl(url)) {
         return NextResponse.json({ error: "Invalid webhook URL" }, { status: 400 });
       }
       update.webhookUrl = url;
@@ -54,7 +55,7 @@ export async function PATCH(req: NextRequest) {
     const user = await User.findOneAndUpdate({ email: session.user.email }, update, { new: true });
     return NextResponse.json(user);
   } catch (err: any) {
-    console.error("PATCH settings error:", err);
+    logError("api", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

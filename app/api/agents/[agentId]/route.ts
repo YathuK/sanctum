@@ -1,3 +1,4 @@
+import { logError } from "@/lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest, { params }: { params: { agentId: str
 
     return NextResponse.json(agent);
   } catch (err: any) {
-    console.error("GET agent error:", err);
+    logError("api", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
@@ -77,7 +78,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { agentId: s
     await agent.save();
     return NextResponse.json(agent);
   } catch (err: any) {
-    console.error("PATCH agent error:", err);
+    logError("api", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
@@ -101,7 +102,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { agentId: 
 
     return NextResponse.json(agent);
   } catch (err: any) {
-    console.error("DELETE agent error:", err);
+    logError("api", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

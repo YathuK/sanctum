@@ -1,3 +1,4 @@
+import { logError } from "@/lib/logger";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/authOptions";
@@ -33,7 +34,7 @@ export async function GET() {
 
     return NextResponse.json({ escalations: results });
   } catch (err: any) {
-    console.error("GET escalations error:", err);
+    logError("api", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -7,6 +7,8 @@ import { Escalation } from "@/lib/models/Escalation";
 import { sanitizeString, sanitizeNumber } from "@/lib/validate";
 import { emitWebhook } from "@/lib/webhooks";
 import { checkRateLimit, rateLimitHeaders } from "@/lib/rateLimit";
+import { validateContentType } from "@/lib/apiSecurity";
+import { logError } from "@/lib/logger";
 import Anthropic from "@anthropic-ai/sdk";
 
 async function analyzeWithClaude(
@@ -36,6 +38,10 @@ async function analyzeWithClaude(
 }
 
 export async function POST(req: NextRequest) {
+  // Content-Type validation
+  const ctError = validateContentType(req);
+  if (ctError) return ctError;
+
   try {
     let body;
     try {
@@ -60,8 +66,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
     }
 
-    // Sandbox mode — simulate without touching DB
-    if (isSandbox) {
+    // Sandbox mode — only in non-production or when explicitly enabled
+    if (isSandbox && (process.env.NODE_ENV !== "production" || process.env.SANCTUM_SANDBOX_ENABLED === "true")) {
       return NextResponse.json({
         status: "approved",
         transactionId: "sandbox_tx_" + Date.now(),
@@ -220,7 +226,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ status: "approved", transactionId: tx._id, claudeAnalysis });
   } catch (err: any) {
-    console.error("Authorize error:", err);
+    logError("authorize", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
