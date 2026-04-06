@@ -275,6 +275,7 @@ export default function LandingPage() {
             <a href="#how-it-works" className="text-sm text-slate-600 hover:text-slate-900 transition-colors">How it Works</a>
             <a href="#pricing" className="text-sm text-slate-600 hover:text-slate-900 transition-colors">Pricing</a>
             <a href="#faq" className="text-sm text-slate-600 hover:text-slate-900 transition-colors">FAQ</a>
+            <Link href="/docs" className="text-sm text-slate-600 hover:text-slate-900 transition-colors">API Docs</Link>
           </div>
           <div className="flex items-center gap-3">
             <Link href="/login" className="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors">

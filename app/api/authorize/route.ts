@@ -5,6 +5,8 @@ import { Agent } from "@/lib/models/Agent";
 import { Transaction } from "@/lib/models/Transaction";
 import { Escalation } from "@/lib/models/Escalation";
 import { sanitizeString, sanitizeNumber } from "@/lib/validate";
+import { emitWebhook } from "@/lib/webhooks";
+import { checkRateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import Anthropic from "@anthropic-ai/sdk";
 
 async function analyzeWithClaude(
@@ -42,6 +44,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
 
+    const isSandbox = body.sandbox === true;
     const agentToken = sanitizeString(body.agentToken, 2000);
     const vendor = sanitizeString(body.vendor, 200);
     const amount = sanitizeNumber(body.amount);
@@ -57,11 +60,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
     }
 
+    // Sandbox mode — simulate without touching DB
+    if (isSandbox) {
+      return NextResponse.json({
+        status: "approved",
+        transactionId: "sandbox_tx_" + Date.now(),
+        claudeAnalysis: "Sandbox mode — transaction simulated, not recorded.",
+        sandbox: true,
+      });
+    }
+
     let payload;
     try {
       payload = verifyAgentToken(agentToken);
     } catch {
       return NextResponse.json({ status: "blocked", reason: "Invalid or expired token" }, { status: 401 });
+    }
+
+    // Rate limiting
+    const rateKey = `authorize:${payload.userId}`;
+    const rateResult = checkRateLimit(rateKey);
+    if (!rateResult.allowed) {
+      return NextResponse.json(
+        { error: "Rate limit exceeded. Upgrade your plan for higher limits." },
+        { status: 429, headers: rateLimitHeaders(rateResult) }
+      );
     }
 
     await connectDB();
@@ -189,6 +212,10 @@ export async function POST(req: NextRequest) {
       claudeAnalysis,
       status: "approved",
       policyRuleApplied: "All checks passed",
+    });
+
+    emitWebhook(agent.userId, "transaction.approved", {
+      transactionId: tx._id, agent: agent.name, vendor, amount, category, claudeAnalysis,
     });
 
     return NextResponse.json({ status: "approved", transactionId: tx._id, claudeAnalysis });

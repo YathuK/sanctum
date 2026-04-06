@@ -1,0 +1,21 @@
+{
+  "name": "@sanctum-ai/sdk",
+  "version": "0.1.0",
+  "description": "Node.js SDK for Sanctum — AI agent transaction authorization",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["sanctum", "ai", "agent", "authorization", "commerce", "spending", "policy"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YathuK/sanctum"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
