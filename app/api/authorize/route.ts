@@ -146,20 +146,21 @@ export async function POST(req: NextRequest) {
     }
 
     // ATOMIC daily spend check + increment
-    // Reset if new day, then try to atomically increment
     const today = new Date().toISOString().split("T")[0];
 
-    // First, reset daily spend if it's a new day
+    // Reset daily spend if it's a new day
     await Agent.findOneAndUpdate(
       { _id: agent._id, lastResetDate: { $ne: today } },
       { $set: { spentToday: 0, lastResetDate: today } }
     );
 
-    // Atomically check and increment spentToday
+    // Atomically check limit and increment spentToday
+    // maxPerDay - amount = the max spentToday can be before this transaction
+    const maxAllowed = policy.maxPerDay - amount;
     const updated = await Agent.findOneAndUpdate(
       {
         _id: agent._id,
-        $expr: { $lte: [{ $add: ["$spentToday", amount] }, policy.maxPerDay] },
+        spentToday: { $lte: maxAllowed },
       },
       { $inc: { spentToday: amount } },
       { new: true }
