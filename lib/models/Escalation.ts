@@ -17,16 +17,19 @@ export interface IEscalation {
 
 const EscalationSchema = new Schema<IEscalation>({
   transactionId: { type: Schema.Types.ObjectId, ref: "Transaction" },
-  agentId: { type: Schema.Types.ObjectId, ref: "Agent", required: true },
+  agentId: { type: Schema.Types.ObjectId, ref: "Agent", required: true, index: true },
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
   requestedAmount: { type: Number, required: true },
   vendor: { type: String, required: true },
   category: { type: String, required: true },
   reason: { type: String, default: "" },
   currency: { type: String, default: "CAD" },
-  status: { type: String, enum: ["pending", "approved", "denied"], default: "pending" },
+  status: { type: String, enum: ["pending", "approved", "denied"], default: "pending", index: true },
   respondedAt: { type: Date },
   createdAt: { type: Date, default: Date.now },
 });
+
+EscalationSchema.index({ userId: 1, status: 1 });
+EscalationSchema.index({ userId: 1, createdAt: -1 });
 
 export const Escalation = models.Escalation || model<IEscalation>("Escalation", EscalationSchema);

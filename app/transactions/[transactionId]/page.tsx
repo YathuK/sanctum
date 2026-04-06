@@ -20,11 +20,11 @@ export default function TransactionDetailPage() {
 
   useEffect(() => {
     if (status === "authenticated") {
-      fetch(`/api/transactions?limit=1000`)
+      fetch(`/api/transactions?id=${txId}`)
         .then((r) => r.json())
         .then((d) => {
-          const found = (d.transactions || []).find((t: any) => t._id === txId);
-          setTx(found || null);
+          const found = (d.transactions || [])[0] || null;
+          setTx(found);
         });
     }
   }, [status, txId]);

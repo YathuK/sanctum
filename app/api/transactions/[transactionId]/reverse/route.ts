@@ -5,35 +5,55 @@ import { connectDB } from "@/lib/mongodb";
 import { Transaction } from "@/lib/models/Transaction";
 import { Agent } from "@/lib/models/Agent";
 import { User } from "@/lib/models/User";
+import { isValidObjectId } from "@/lib/validate";
 
 export async function POST(req: NextRequest, { params }: { params: { transactionId: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  await connectDB();
-  const user = await User.findOne({ email: session.user.email });
-  if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    if (!isValidObjectId(params.transactionId)) {
+      return NextResponse.json({ error: "Invalid transaction ID" }, { status: 400 });
+    }
 
-  const tx = await Transaction.findOne({ _id: params.transactionId, userId: user._id });
-  if (!tx) return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
+    await connectDB();
+    const user = await User.findOne({ email: session.user.email });
+    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-  if (tx.status !== "approved") {
-    return NextResponse.json({ error: "Can only reverse approved transactions" }, { status: 400 });
+    // Atomic: only reverse if status is still "approved" and within 24 hours
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const tx = await Transaction.findOneAndUpdate(
+      {
+        _id: params.transactionId,
+        userId: user._id,
+        status: "approved",
+        createdAt: { $gte: twentyFourHoursAgo },
+      },
+      { $set: { status: "reversed" } },
+      { new: true }
+    );
+
+    if (!tx) {
+      return NextResponse.json({
+        error: "Transaction not found, already reversed, or outside 24-hour window"
+      }, { status: 400 });
+    }
+
+    // Atomic decrement of agent spentToday
+    await Agent.findByIdAndUpdate(tx.agentId, {
+      $inc: { spentToday: -tx.amount },
+    });
+
+    // Ensure spentToday doesn't go below 0
+    await Agent.findOneAndUpdate(
+      { _id: tx.agentId, spentToday: { $lt: 0 } },
+      { $set: { spentToday: 0 } }
+    );
+
+    return NextResponse.json(tx);
+  } catch (err: any) {
+    console.error("Reverse error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
-
-  const hoursSince = (Date.now() - new Date(tx.createdAt).getTime()) / (1000 * 60 * 60);
-  if (hoursSince > 24) {
-    return NextResponse.json({ error: "Can only reverse transactions within 24 hours" }, { status: 400 });
-  }
-
-  tx.status = "reversed";
-  await tx.save();
-
-  const agent = await Agent.findById(tx.agentId);
-  if (agent) {
-    agent.spentToday = Math.max(0, agent.spentToday - tx.amount);
-    await agent.save();
-  }
-
-  return NextResponse.json(tx);
 }

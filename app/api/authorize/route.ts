@@ -4,15 +4,8 @@ import { verifyAgentToken } from "@/lib/jwt";
 import { Agent } from "@/lib/models/Agent";
 import { Transaction } from "@/lib/models/Transaction";
 import { Escalation } from "@/lib/models/Escalation";
+import { sanitizeString, sanitizeNumber } from "@/lib/validate";
 import Anthropic from "@anthropic-ai/sdk";
-
-function resetSpentIfNewDay(agent: any) {
-  const today = new Date().toISOString().split("T")[0];
-  if (agent.lastResetDate !== today) {
-    agent.spentToday = 0;
-    agent.lastResetDate = today;
-  }
-}
 
 async function analyzeWithClaude(
   amount: number,
@@ -42,11 +35,26 @@ async function analyzeWithClaude(
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { agentToken, vendor, amount, currency, category, reasoning } = body;
+    let body;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    }
+
+    const agentToken = sanitizeString(body.agentToken, 2000);
+    const vendor = sanitizeString(body.vendor, 200);
+    const amount = sanitizeNumber(body.amount);
+    const currency = sanitizeString(body.currency, 3) || "CAD";
+    const category = sanitizeString(body.category, 50);
+    const reasoning = sanitizeString(body.reasoning, 1000);
 
     if (!agentToken || !vendor || !amount || !category) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    }
+
+    if (amount <= 0 || amount > 100_000_000) {
+      return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
     }
 
     let payload;
@@ -63,101 +71,120 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "blocked", reason: "Agent not found" }, { status: 404 });
     }
 
+    // Verify token userId matches agent userId
+    if (agent.userId.toString() !== payload.userId) {
+      return NextResponse.json({ status: "blocked", reason: "Token mismatch" }, { status: 403 });
+    }
+
+    // Use fresh policy from DB, not from token
+    const policy = agent.policy;
+
     if (agent.status !== "active") {
-      const tx = await Transaction.create({
-        agentId: agent._id,
-        userId: agent.userId,
-        vendor, amount, currency: currency || "CAD", category,
-        agentReasoning: reasoning || "",
+      await Transaction.create({
+        agentId: agent._id, userId: agent.userId,
+        vendor, amount, currency, category,
+        agentReasoning: reasoning,
         status: "blocked",
         policyRuleApplied: `Agent is ${agent.status}`,
       });
-      return NextResponse.json({ status: "blocked", reason: `Agent is ${agent.status}`, transactionId: tx._id });
+      return NextResponse.json({ status: "blocked", reason: `Agent is ${agent.status}` });
     }
 
     if (new Date() > new Date(agent.expiresAt)) {
-      agent.status = "expired";
-      await agent.save();
+      await Agent.findByIdAndUpdate(agent._id, { status: "expired" });
       return NextResponse.json({ status: "blocked", reason: "Agent token has expired" });
     }
 
     // Check blocked vendors
-    const blockedVendors = agent.policy.blockedVendors.map((v: string) => v.toLowerCase());
-    if (blockedVendors.includes(vendor.toLowerCase())) {
-      const tx = await Transaction.create({
+    const blockedVendors = policy.blockedVendors.map((v: string) => v.toLowerCase().trim());
+    if (blockedVendors.includes(vendor.toLowerCase().trim())) {
+      await Transaction.create({
         agentId: agent._id, userId: agent.userId,
-        vendor, amount, currency: currency || "CAD", category,
-        agentReasoning: reasoning || "",
+        vendor, amount, currency, category,
+        agentReasoning: reasoning,
         status: "blocked",
         policyRuleApplied: "Vendor is blocked",
       });
-      return NextResponse.json({ status: "blocked", reason: "Vendor is blocked", policyRuleApplied: "blockedVendors", transactionId: tx._id });
+      return NextResponse.json({ status: "blocked", reason: "Vendor is blocked", policyRuleApplied: "blockedVendors" });
     }
 
     // Check approved categories
-    if (agent.policy.approvedCategories.length > 0 && !agent.policy.approvedCategories.includes(category)) {
-      const tx = await Transaction.create({
+    if (policy.approvedCategories.length > 0 && !policy.approvedCategories.includes(category)) {
+      await Transaction.create({
         agentId: agent._id, userId: agent.userId,
-        vendor, amount, currency: currency || "CAD", category,
-        agentReasoning: reasoning || "",
+        vendor, amount, currency, category,
+        agentReasoning: reasoning,
         status: "blocked",
         policyRuleApplied: "Category not approved",
       });
-      return NextResponse.json({ status: "blocked", reason: "Category not approved", policyRuleApplied: "approvedCategories", transactionId: tx._id });
+      return NextResponse.json({ status: "blocked", reason: "Category not approved", policyRuleApplied: "approvedCategories" });
     }
 
     // Check max per transaction
-    if (amount > agent.policy.maxPerTransaction) {
-      const tx = await Transaction.create({
+    if (amount > policy.maxPerTransaction) {
+      await Transaction.create({
         agentId: agent._id, userId: agent.userId,
-        vendor, amount, currency: currency || "CAD", category,
-        agentReasoning: reasoning || "",
+        vendor, amount, currency, category,
+        agentReasoning: reasoning,
         status: "blocked",
         policyRuleApplied: "Exceeds max per transaction",
       });
-      return NextResponse.json({ status: "blocked", reason: "Exceeds max per transaction", policyRuleApplied: "maxPerTransaction", transactionId: tx._id });
-    }
-
-    // Reset daily spend if new day
-    resetSpentIfNewDay(agent);
-
-    // Check max per day
-    if (agent.spentToday + amount > agent.policy.maxPerDay) {
-      const tx = await Transaction.create({
-        agentId: agent._id, userId: agent.userId,
-        vendor, amount, currency: currency || "CAD", category,
-        agentReasoning: reasoning || "",
-        status: "blocked",
-        policyRuleApplied: "Exceeds daily spending limit",
-      });
-      return NextResponse.json({ status: "blocked", reason: "Exceeds daily spending limit", policyRuleApplied: "maxPerDay", transactionId: tx._id });
+      return NextResponse.json({ status: "blocked", reason: "Exceeds max per transaction", policyRuleApplied: "maxPerTransaction" });
     }
 
     // Check if requires human approval
-    if (amount > agent.policy.requiresApprovalAbove) {
+    if (amount > policy.requiresApprovalAbove) {
       const escalation = await Escalation.create({
         agentId: agent._id,
         userId: agent.userId,
         requestedAmount: amount,
-        vendor,
-        category,
-        reason: reasoning || "",
-        currency: currency || "CAD",
+        vendor, category,
+        reason: reasoning,
+        currency,
       });
       return NextResponse.json({ status: "pending_approval", escalationId: escalation._id });
     }
 
-    // All checks pass - approve
-    const claudeAnalysis = await analyzeWithClaude(amount, vendor, category, reasoning || "", agent.policy);
+    // ATOMIC daily spend check + increment
+    // Reset if new day, then try to atomically increment
+    const today = new Date().toISOString().split("T")[0];
 
-    agent.spentToday += amount;
-    await agent.save();
+    // First, reset daily spend if it's a new day
+    await Agent.findOneAndUpdate(
+      { _id: agent._id, lastResetDate: { $ne: today } },
+      { $set: { spentToday: 0, lastResetDate: today } }
+    );
+
+    // Atomically check and increment spentToday
+    const updated = await Agent.findOneAndUpdate(
+      {
+        _id: agent._id,
+        $expr: { $lte: [{ $add: ["$spentToday", amount] }, policy.maxPerDay] },
+      },
+      { $inc: { spentToday: amount } },
+      { new: true }
+    );
+
+    if (!updated) {
+      await Transaction.create({
+        agentId: agent._id, userId: agent.userId,
+        vendor, amount, currency, category,
+        agentReasoning: reasoning,
+        status: "blocked",
+        policyRuleApplied: "Exceeds daily spending limit",
+      });
+      return NextResponse.json({ status: "blocked", reason: "Exceeds daily spending limit", policyRuleApplied: "maxPerDay" });
+    }
+
+    // All checks pass — approve
+    // Run Claude analysis in background (don't block response)
+    const claudeAnalysis = await analyzeWithClaude(amount, vendor, category, reasoning, policy);
 
     const tx = await Transaction.create({
       agentId: agent._id,
       userId: agent.userId,
-      vendor, amount, currency: currency || "CAD", category,
-      agentReasoning: reasoning || "",
+      vendor, amount, currency, category,
+      agentReasoning: reasoning,
       claudeAnalysis,
       status: "approved",
       policyRuleApplied: "All checks passed",
@@ -165,6 +192,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ status: "approved", transactionId: tx._id, claudeAnalysis });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || "Internal error" }, { status: 500 });
+    console.error("Authorize error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -18,7 +18,7 @@ export interface ITransaction {
 }
 
 const TransactionSchema = new Schema<ITransaction>({
-  agentId: { type: Schema.Types.ObjectId, ref: "Agent", required: true },
+  agentId: { type: Schema.Types.ObjectId, ref: "Agent", required: true, index: true },
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
   vendor: { type: String, required: true },
   amount: { type: Number, required: true },
@@ -30,11 +30,16 @@ const TransactionSchema = new Schema<ITransaction>({
     type: String,
     enum: ["approved", "blocked", "pending_approval", "reversed"],
     required: true,
+    index: true,
   },
   policyRuleApplied: { type: String, default: "" },
   humanApprovedBy: { type: String },
   humanApprovedAt: { type: Date },
   createdAt: { type: Date, default: Date.now },
 });
+
+TransactionSchema.index({ userId: 1, createdAt: -1 });
+TransactionSchema.index({ userId: 1, status: 1, createdAt: -1 });
+TransactionSchema.index({ agentId: 1, createdAt: -1 });
 
 export const Transaction = models.Transaction || model<ITransaction>("Transaction", TransactionSchema);

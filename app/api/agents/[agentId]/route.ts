@@ -5,6 +5,7 @@ import { connectDB } from "@/lib/mongodb";
 import { Agent } from "@/lib/models/Agent";
 import { User } from "@/lib/models/User";
 import { signAgentToken } from "@/lib/jwt";
+import { isValidObjectId, sanitizeString } from "@/lib/validate";
 
 async function getUser(session: any) {
   await connectDB();
@@ -12,60 +13,95 @@ async function getUser(session: any) {
 }
 
 export async function GET(req: NextRequest, { params }: { params: { agentId: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const user = await getUser(session);
-  const agent = await Agent.findOne({ _id: params.agentId, userId: user!._id });
-  if (!agent) return NextResponse.json({ error: "Agent not found" }, { status: 404 });
+    if (!isValidObjectId(params.agentId)) {
+      return NextResponse.json({ error: "Invalid agent ID" }, { status: 400 });
+    }
 
-  return NextResponse.json(agent);
+    const user = await getUser(session);
+    const agent = await Agent.findOne({ _id: params.agentId, userId: user!._id });
+    if (!agent) return NextResponse.json({ error: "Agent not found" }, { status: 404 });
+
+    return NextResponse.json(agent);
+  } catch (err: any) {
+    console.error("GET agent error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: { agentId: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const user = await getUser(session);
-  const body = await req.json();
+    if (!isValidObjectId(params.agentId)) {
+      return NextResponse.json({ error: "Invalid agent ID" }, { status: 400 });
+    }
 
-  const agent = await Agent.findOne({ _id: params.agentId, userId: user!._id });
-  if (!agent) return NextResponse.json({ error: "Agent not found" }, { status: 404 });
+    let body;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    }
 
-  if (body.policy) agent.policy = { ...agent.policy, ...body.policy };
-  if (body.status) agent.status = body.status;
-  if (body.name) agent.name = body.name;
-  if (body.description !== undefined) agent.description = body.description;
+    const user = await getUser(session);
+    const agent = await Agent.findOne({ _id: params.agentId, userId: user!._id });
+    if (!agent) return NextResponse.json({ error: "Agent not found" }, { status: 404 });
 
-  if (body.regenerateToken) {
-    const token = signAgentToken(
-      {
-        agentId: agent._id.toString(),
-        userId: user!._id.toString(),
-        policy: agent.policy,
-      },
-      agent.expiresAt
-    );
-    agent.token = token;
+    if (body.policy) {
+      const p = body.policy;
+      if (p.maxPerTransaction !== undefined) agent.policy.maxPerTransaction = Math.round(Number(p.maxPerTransaction));
+      if (p.maxPerDay !== undefined) agent.policy.maxPerDay = Math.round(Number(p.maxPerDay));
+      if (p.requiresApprovalAbove !== undefined) agent.policy.requiresApprovalAbove = Math.round(Number(p.requiresApprovalAbove));
+      if (Array.isArray(p.approvedCategories)) agent.policy.approvedCategories = p.approvedCategories;
+      if (Array.isArray(p.blockedVendors)) agent.policy.blockedVendors = p.blockedVendors;
+    }
+    if (body.status && ["active", "suspended"].includes(body.status)) agent.status = body.status;
+    if (body.name) agent.name = sanitizeString(body.name, 100);
+    if (body.description !== undefined) agent.description = sanitizeString(body.description, 500);
+
+    if (body.regenerateToken) {
+      const token = signAgentToken(
+        { agentId: agent._id.toString(), userId: user!._id.toString(), policy: agent.policy },
+        agent.expiresAt
+      );
+      agent.token = token;
+      await agent.save();
+      return NextResponse.json({ ...agent.toObject(), token });
+    }
+
     await agent.save();
-    return NextResponse.json({ ...agent.toObject(), token });
+    return NextResponse.json(agent);
+  } catch (err: any) {
+    console.error("PATCH agent error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
-
-  await agent.save();
-  return NextResponse.json(agent);
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: { agentId: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const user = await getUser(session);
-  const agent = await Agent.findOneAndUpdate(
-    { _id: params.agentId, userId: user!._id },
-    { status: "suspended" },
-    { new: true }
-  );
-  if (!agent) return NextResponse.json({ error: "Agent not found" }, { status: 404 });
+    if (!isValidObjectId(params.agentId)) {
+      return NextResponse.json({ error: "Invalid agent ID" }, { status: 400 });
+    }
 
-  return NextResponse.json(agent);
+    const user = await getUser(session);
+    const agent = await Agent.findOneAndUpdate(
+      { _id: params.agentId, userId: user!._id },
+      { status: "suspended" },
+      { new: true }
+    );
+    if (!agent) return NextResponse.json({ error: "Agent not found" }, { status: 404 });
+
+    return NextResponse.json(agent);
+  } catch (err: any) {
+    console.error("DELETE agent error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
 }

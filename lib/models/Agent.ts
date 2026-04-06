@@ -22,11 +22,11 @@ export interface IAgent {
 }
 
 const AgentSchema = new Schema<IAgent>({
-  userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
   name: { type: String, required: true },
   description: { type: String, default: "" },
   token: { type: String, required: true },
-  status: { type: String, enum: ["active", "suspended", "expired"], default: "active" },
+  status: { type: String, enum: ["active", "suspended", "expired"], default: "active", index: true },
   policy: {
     maxPerTransaction: { type: Number, required: true },
     maxPerDay: { type: Number, required: true },
@@ -40,5 +40,7 @@ const AgentSchema = new Schema<IAgent>({
   createdAt: { type: Date, default: Date.now },
   expiresAt: { type: Date, required: true },
 });
+
+AgentSchema.index({ userId: 1, status: 1 });
 
 export const Agent = models.Agent || model<IAgent>("Agent", AgentSchema);

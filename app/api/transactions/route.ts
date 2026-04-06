@@ -5,49 +5,78 @@ import { connectDB } from "@/lib/mongodb";
 import { Transaction } from "@/lib/models/Transaction";
 import { User } from "@/lib/models/User";
 import { Agent } from "@/lib/models/Agent";
+import { isValidObjectId, isValidTransactionStatus } from "@/lib/validate";
 
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  await connectDB();
-  const user = await User.findOne({ email: session.user.email });
-  if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    await connectDB();
+    const user = await User.findOne({ email: session.user.email });
+    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-  const url = new URL(req.url);
-  const status = url.searchParams.get("status");
-  const agentId = url.searchParams.get("agentId");
-  const from = url.searchParams.get("from");
-  const to = url.searchParams.get("to");
-  const page = parseInt(url.searchParams.get("page") || "1");
-  const limit = parseInt(url.searchParams.get("limit") || "50");
+    const url = new URL(req.url);
+    const status = url.searchParams.get("status");
+    const agentId = url.searchParams.get("agentId");
+    const from = url.searchParams.get("from");
+    const to = url.searchParams.get("to");
+    const id = url.searchParams.get("id");
+    const page = Math.max(1, parseInt(url.searchParams.get("page") || "1") || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get("limit") || "50") || 50));
 
-  const filter: any = { userId: user._id };
-  if (status) filter.status = status;
-  if (agentId) filter.agentId = agentId;
-  if (from || to) {
-    filter.createdAt = {};
-    if (from) filter.createdAt.$gte = new Date(from);
-    if (to) filter.createdAt.$lte = new Date(to);
+    // Direct lookup by ID
+    if (id) {
+      if (!isValidObjectId(id)) return NextResponse.json({ transactions: [], total: 0, page: 1, pages: 0 });
+      const tx = await Transaction.findOne({ _id: id, userId: user._id });
+      if (!tx) return NextResponse.json({ transactions: [], total: 0, page: 1, pages: 0 });
+      const agent = await Agent.findById(tx.agentId);
+      return NextResponse.json({
+        transactions: [{ ...tx.toObject(), agentName: agent?.name || "Unknown" }],
+        total: 1, page: 1, pages: 1,
+      });
+    }
+
+    const filter: any = { userId: user._id };
+    if (status && isValidTransactionStatus(status)) filter.status = status;
+    if (agentId && isValidObjectId(agentId)) filter.agentId = agentId;
+    if (from || to) {
+      filter.createdAt = {};
+      if (from) {
+        const fromDate = new Date(from);
+        if (!isNaN(fromDate.getTime())) filter.createdAt.$gte = fromDate;
+      }
+      if (to) {
+        const toDate = new Date(to);
+        if (!isNaN(toDate.getTime())) filter.createdAt.$lte = toDate;
+      }
+      if (Object.keys(filter.createdAt).length === 0) delete filter.createdAt;
+    }
+
+    const [transactions, total] = await Promise.all([
+      Transaction.find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Transaction.countDocuments(filter),
+    ]);
+
+    // Batch fetch agent names
+    const agentIds = [...new Set(transactions.map((t: any) => t.agentId.toString()))];
+    const agents = agentIds.length > 0
+      ? await Agent.find({ _id: { $in: agentIds } }).select("name").lean()
+      : [];
+    const agentMap = new Map(agents.map((a: any) => [a._id.toString(), a.name]));
+
+    const results = transactions.map((t: any) => ({
+      ...t,
+      agentName: agentMap.get(t.agentId.toString()) || "Unknown",
+    }));
+
+    return NextResponse.json({ transactions: results, total, page, pages: Math.ceil(total / limit) });
+  } catch (err: any) {
+    console.error("GET transactions error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
-
-  const [transactions, total] = await Promise.all([
-    Transaction.find(filter)
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit),
-    Transaction.countDocuments(filter),
-  ]);
-
-  // Attach agent names
-  const agentIds = [...new Set(transactions.map((t) => t.agentId.toString()))];
-  const agents = await Agent.find({ _id: { $in: agentIds } });
-  const agentMap = new Map(agents.map((a) => [a._id.toString(), a.name]));
-
-  const results = transactions.map((t) => ({
-    ...t.toObject(),
-    agentName: agentMap.get(t.agentId.toString()) || "Unknown",
-  }));
-
-  return NextResponse.json({ transactions: results, total, page, pages: Math.ceil(total / limit) });
 }
