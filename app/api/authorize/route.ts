@@ -194,6 +194,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ status: "approved", transactionId: tx._id, claudeAnalysis });
   } catch (err: any) {
     console.error("Authorize error:", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: "Internal server error", debug: err.message || String(err) }, { status: 500 });
   }
 }
