@@ -1,9 +1,12 @@
 import { NextAuthOptions } from "next-auth";
 import EmailProvider from "next-auth/providers/email";
+import { MongoDBAdapter } from "@next-auth/mongodb-adapter";
+import clientPromise from "@/lib/mongoClient";
 import { connectDB } from "@/lib/mongodb";
 import { User } from "@/lib/models/User";
 
 export const authOptions: NextAuthOptions = {
+  adapter: MongoDBAdapter(clientPromise),
   providers: [
     EmailProvider({
       server: {
@@ -14,7 +17,7 @@ export const authOptions: NextAuthOptions = {
           pass: process.env.EMAIL_SERVER_PASSWORD || process.env.RESEND_API_KEY || "",
         },
       },
-      from: process.env.EMAIL_FROM || "sanctum@resend.dev",
+      from: process.env.EMAIL_FROM || "onboarding@resend.dev",
     }),
   ],
   secret: process.env.NEXTAUTH_SECRET,
